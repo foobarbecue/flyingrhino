@@ -12,7 +12,8 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-import pandas, datetime, utils, string
+import pandas, datetime, utils, string, pdb
+import pylab
 
 #datatypes defined in ardupilot/libraries/DataFlash/DataFlash.h
 fmt_units={
@@ -96,6 +97,7 @@ class flight():
                 continue
         self.logdata=dflog_by_msg
     
+    
     def save_logdict_as_hdf5(self):
         raise NotImplementedError
     
@@ -142,10 +144,14 @@ class flight():
         """
         Plots the data in a single column of subplots.
         """
-        plt.figsize(14,50)
+        pylab.ion()
+        fig=pylab.figure(figsize=(14,50))
         #remove the data that isn't worth plotting
-        pltdata={k:v for k,v in flight.logdata.iteritems() if not k.startswith(suppress)}
+        pltdata={k:v for k,v in self.logdata.iteritems() if not k.startswith(suppress)}
         ncols=1
-        nrows=ceil(len(pltdata)/ncols)
+        nrows=len(pltdata)/ncols
         for idx, msg_name in enumerate(pltdata):
-            flight.logdata[msg_name].plot(ax=subplot(nrows,ncols,idx), title=msg_name, **kwargs)
+            # idx + 1 because enumerate starts at 0 but pylab indexes starting at 1
+            pdb.set_trace()
+            subpl=fig.add_subplot(nrows,ncols,idx)
+            self.logdata[msg_name].plot(ax=subpl, title=msg_name, **kwargs)
