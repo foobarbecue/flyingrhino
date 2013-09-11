@@ -13,7 +13,7 @@
 #limitations under the License.
 
 import pandas, datetime, utils, string, pdb
-import pylab
+import pylab, sqlite3
 
 #datatypes defined in ardupilot/libraries/DataFlash/DataFlash.h
 fmt_units={
@@ -55,13 +55,14 @@ fmt_dtypes={
 
 class flight():
     logdata=None
-    
+    flight_name=None
     def __init__(self, dflog_path, **time_kwargs):
         self.read_dflog(dflog_path)
         self.set_dtype_from_fmt()
         
         #if no starttime info, use the filename date
         dt=utils.logpath2dt(dflog_path)
+        self.flight_name=str(dt)
         self.set_times_from_ublox(year=dt.year, month=dt.month, day=dt.day)
 
     def read_dflog(self, dflog_path, startTime=None, max_cols=20):
@@ -155,3 +156,32 @@ class flight():
             pdb.set_trace()
             subpl=fig.add_subplot(nrows,ncols,idx)
             self.logdata[msg_name].plot(ax=subpl, title=msg_name, **kwargs)
+    
+    def to_afterflight_msgtbl(self,msg_type):
+        msgtbl=self.logdata[msg_type]
+        msgtbl=pandas.DataFrame(zip(
+                    [msg_type,]*3519,
+                    [self.flight_name,]*3519,
+                    msgtbl.index.astype(int)))
+        msgtbl.columns=['msgType','flight','timestamp']
+        return msgtbl
+    
+    def to_afterflight_datatbl(self,msg_type):
+        datatbl=self.logdata[msg_type].stack()
+        datatbl=pandas.DataFrame(zip(
+                    datatbl.index.get_level_values(0).astype(int),
+                    datatbl.index.get_level_values(1).astype(str),
+                    datatbl.values))
+        datatbl.columns=['timestamp','msgField','value']
+        return datatbl
+        
+    def to_afterflight_sql(self, connection=None, close_when_done=True, db_name='flyingrhi'):
+        if not connection:
+            myconn=sqlite3.connect('flyrhiAfterflightTest')
+        for dataframe in self.logdata:
+            msgtbl=self.to_afterflight_msgtbl(dataframe)
+            msgtbl.to_sql('logbrowse_mavmessage',myconn,if_exists='append')
+            datatbl=self.to_afterflight_datatbl(dataframe)
+            datatbl.to_sql('logbrowse_mavdatum',myconn,if_exists='append')
+        if close_when_done:
+            myconn.close()
