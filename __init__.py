@@ -157,13 +157,14 @@ class flight():
             subpl=fig.add_subplot(nrows,ncols,idx)
             self.logdata[msg_name].plot(ax=subpl, title=msg_name, **kwargs)
     
-    def to_afterflight_msgtbl(self,msg_type):
+    def to_afterflight_msgtbl(self,msg_type,flight_id=None):
         msgtbl=self.logdata[msg_type]
+        num_rows=msgtbl.shape[0]
         msgtbl=pandas.DataFrame(zip(
-                    [msg_type,]*3519,
-                    [self.flight_name,]*3519,
+                    [msg_type,]*num_rows,
+                    [flight_id or self.flight_name,]*num_rows,
                     msgtbl.index.astype(int)))
-        msgtbl.columns=['msgType','flight','timestamp']
+        msgtbl.columns=['msgType','flight_id','timestamp']
         return msgtbl
     
     def to_afterflight_datatbl(self,msg_type):
@@ -175,13 +176,14 @@ class flight():
         datatbl.columns=['timestamp','msgField','value']
         return datatbl
         
-    def to_afterflight_sql(self, connection=None, close_when_done=True, db_name='flyingrhi'):
-        if not connection:
-            myconn=sqlite3.connect('flyrhiAfterflightTest')
-        for dataframe in self.logdata:
-            msgtbl=self.to_afterflight_msgtbl(dataframe)
-            msgtbl.to_sql('logbrowse_mavmessage',myconn,if_exists='append')
-            datatbl=self.to_afterflight_datatbl(dataframe)
-            datatbl.to_sql('logbrowse_mavdatum',myconn,if_exists='append')
+    def to_afterflight_sql(self, dbconn=None, close_when_done=True, db_name='flyingrhi', flight_id=None):
+        if not dbconn:
+            dbconn=sqlite3.connect('flyrhi.db')
+        for msg_type in self.logdata:
+            print "Processing " + msg_type
+            msgtbl=self.to_afterflight_msgtbl(msg_type,flight_id)
+            msgtbl.to_sql('logbrowse_mavmessage',dbconn,if_exists='append')
+            datatbl=self.to_afterflight_datatbl(msg_type)
+            datatbl.to_sql('logbrowse_mavdatum',dbconn,if_exists='append')
         if close_when_done:
-            myconn.close()
+            dbconn.close()
