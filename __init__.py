@@ -62,7 +62,7 @@ class flight():
         
         #if no starttime info, use the filename date
         dt=utils.logpath2dt(dflog_path)
-        self.flight_name=str(dt)
+        self.flight_name=str(dt).replace(' ', '_')
         self.set_times_from_ublox(year=dt.year, month=dt.month, day=dt.day)
 
     def read_dflog(self, dflog_path, startTime=None, max_cols=20):
@@ -175,10 +175,20 @@ class flight():
                     datatbl.values))
         datatbl.columns=['timestamp','msgField','value']
         return datatbl
+    
+    def to_afterflight_flighttbl(self,flight_id=None):
+        flighttbl=pandas.DataFrame([self.flight_name,])
+        flighttbl.columns=['slug']
+        return flighttbl
         
     def to_afterflight_sql(self, dbconn=None, close_when_done=True, db_name='flyingrhi', flight_id=None):
         if not dbconn:
             dbconn=sqlite3.connect('flyrhi.db')
+        try:
+            flighttbl=self.to_afterflight_flighttbl(flight_id)
+            flighttbl.to_sql('logbrowse_flight',dbconn,if_exists='append')
+        except dbconn.IntegrityError:
+            print "Flight %s already exists in the database" % self.flight_name 
         for msg_type in self.logdata:
             print "Processing " + msg_type
             msgtbl=self.to_afterflight_msgtbl(msg_type,flight_id)
