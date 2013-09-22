@@ -62,7 +62,7 @@ class flight():
         
         #if no starttime info, use the filename date
         dt=utils.logpath2dt(dflog_path)
-        self.flight_name=str(dt).replace(' ', '_')
+        self.flight_name=utils.slugify(dflog_path.split('/')[-1])
         self.set_times_from_ublox(year=dt.year, month=dt.month, day=dt.day)
 
     def read_dflog(self, dflog_path, startTime=None, max_cols=20):
@@ -190,8 +190,7 @@ class flight():
             flighttbl=self.to_afterflight_flighttbl(flight_id)
             flighttbl.to_sql('logbrowse_flight',dbconn,if_exists='append')
         except dbconn.IntegrityError:
-            print "Flight %s already exists in the database. Not importing." % self.flight_name 
-            return None
+            print "Flight %s already exists in the database. Not creating." % self.flight_name 
         for msg_type in self.logdata:
                 msgtbl=self.to_afterflight_msgtbl(msg_type,flight_id)
                 msgtbl.to_sql('logbrowse_mavmessage',dbconn,if_exists='append')

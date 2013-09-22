@@ -12,7 +12,7 @@
    #See the License for the specific language governing permissions and
    #limitations under the License.
 
-import calendar, datetime, re
+import calendar, datetime, re, unicodedata
 
 def dt2jsts(datetime):
     """
@@ -26,4 +26,19 @@ def logpath2dt(filepath):
     given a dataflashlog in the format produced by Mission Planner,
     return a datetime which says when the file was downloaded from the APM
     """
-    return datetime.datetime.strptime(re.match(r'.*/(.*) .*$',filepath).groups()[0],'%Y-%m-%d %H-%M')
+    try:
+        return datetime.datetime.strptime(filepath.split('/')[-1].replace('log','').replace('tlog','')[:16],'%Y-%m-%d-%H-%M')
+    except AttributeError:
+        return datetime.datetime.strptime(re.match(r'.*/(.*) .*$',filepath.replace('_',' ')).groups()[0],'%Y-%m-%d %H-%M')
+
+def slugify(value):
+    """
+    Copied from django.utils.text.slugify and modified to remove dependencies
+    
+    Converts to lowercase, removes non-word characters (alphanumerics and
+    underscores) and converts spaces to hyphens. Also strips leading and
+    trailing whitespace.
+    """
+    value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+    value = re.sub('[^\w\s-]', '', value).strip().lower()
+    return re.sub('[-\s]+', '-', value)
