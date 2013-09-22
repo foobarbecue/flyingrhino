@@ -12,7 +12,7 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-import pandas, datetime, utils, string, pdb
+import pandas, datetime, utils, string, pdb, numpy
 import pylab, sqlite3
 
 #datatypes defined in ardupilot/libraries/DataFlash/DataFlash.h
@@ -163,17 +163,19 @@ class flight():
         msgtbl=pandas.DataFrame(zip(
                     [msg_type,]*num_rows,
                     [flight_id or self.flight_name,]*num_rows,
-                    msgtbl.index.astype(int)))
+                    msgtbl.index))
         msgtbl.columns=['msgType','flight_id','timestamp']
+        msgtbl['timestamp']=msgtbl.timestamp.apply(lambda x: x.isoformat().replace('T',' '))
         return msgtbl
-    
+
     def to_afterflight_datatbl(self,msg_type):
         datatbl=self.logdata[msg_type].stack()
         datatbl=pandas.DataFrame(zip(
-                    datatbl.index.get_level_values(0).astype(int),
-                    datatbl.index.get_level_values(1).astype(str),
+                    datatbl.index.get_level_values(0),
+                    datatbl.index.get_level_values(1),
                     datatbl.values))
         datatbl.columns=['timestamp','msgField','value']
+        datatbl['timestamp']=datatbl.timestamp.apply(lambda x: x.isoformat().replace('T',' '))
         return datatbl
     
     def to_afterflight_flighttbl(self,flight_id=None):
@@ -188,12 +190,13 @@ class flight():
             flighttbl=self.to_afterflight_flighttbl(flight_id)
             flighttbl.to_sql('logbrowse_flight',dbconn,if_exists='append')
         except dbconn.IntegrityError:
-            print "Flight %s already exists in the database" % self.flight_name 
+            print "Flight %s already exists in the database. Not importing." % self.flight_name 
+            return None
         for msg_type in self.logdata:
-            print "Processing " + msg_type
-            msgtbl=self.to_afterflight_msgtbl(msg_type,flight_id)
-            msgtbl.to_sql('logbrowse_mavmessage',dbconn,if_exists='append')
-            datatbl=self.to_afterflight_datatbl(msg_type)
-            datatbl.to_sql('logbrowse_mavdatum',dbconn,if_exists='append')
+                msgtbl=self.to_afterflight_msgtbl(msg_type,flight_id)
+                msgtbl.to_sql('logbrowse_mavmessage',dbconn,if_exists='append')
+                datatbl=self.to_afterflight_datatbl(msg_type)
+                datatbl.to_sql('logbrowse_mavdatum',dbconn,if_exists='append')
+                print "Processed " + msg_type
         if close_when_done:
             dbconn.close()
