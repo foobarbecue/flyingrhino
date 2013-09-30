@@ -14,6 +14,7 @@
 
 import pandas, datetime, utils, string, pdb, numpy
 import pylab, sqlite3
+from pymavlink import mavutil
 
 #datatypes defined in ardupilot/libraries/DataFlash/DataFlash.h
 fmt_units={
@@ -56,7 +57,7 @@ fmt_dtypes={
 class flight():
     logdata=None
     flight_name=None
-    def __init__(self, dflog_path, **time_kwargs):
+    def __init__(self, dflog_path, messaging=None, **time_kwargs):
         self.read_dflog(dflog_path)
         self.set_dtype_from_fmt()
         
@@ -65,7 +66,7 @@ class flight():
         self.flight_name=utils.slugify(dflog_path.split('/')[-1])
         self.set_times_from_ublox(year=dt.year, month=dt.month, day=dt.day)
 
-    def read_dflog(self, dflog_path, startTime=None, max_cols=20):
+    def read_dflog(self, dflog_path, start_time=None, max_cols=20):
         """
         Reads in a APM dataflash .log file, returning it as a pandas DataFrame.
         File must be in the self-describing format (no legacy support yet).
@@ -135,7 +136,8 @@ class flight():
                 epoch=datetime.datetime(year=year,month=1,day=1)+datetime.timedelta(week_of_year)
             if year and month:
                 epoch=datetime.datetime(year=year,month=month,day=day)
-
+        #increment the epoch by the first gps timestamp TODO: check for problem when no lock
+        epoch+=datetime.timedelta(milliseconds=int(f))
         linenum2time=lambda x : epoch + datetime.timedelta(milliseconds=x * ms_per_logline)
 
         for cmd_table in self.logdata.values():
