@@ -63,7 +63,7 @@ class flight():
         
         #if no starttime info, use the filename date
         dt=utils.logpath2dt(dflog_path)
-        self.flight_name=utils.slugify(dflog_path.split('/')[-1])
+        self.flight_name=utils.slugify(dflog_path.split('/')[-1]).replace(' ','-')
         self.set_times_from_ublox(year=dt.year, month=dt.month, day=dt.day)
 
     def read_dflog(self, dflog_path, start_time=None, max_cols=20):
@@ -120,28 +120,33 @@ class flight():
                 cmd_param_name, col_data = col
                 self.logdata[cmd_name][cmd_param_name]=col[1].astype(fmt_dtypes[dtype_char])
     
-    def set_times_from_ublox(self, week_of_year=None, year=None, month=None, day=None, epoch=None):
+    def set_times_from_ublox(self, week_of_year=None, year=None, month=None, day=None, epoch=None, assume_continuous=True):
         """
         Replaces line numbers in the log data with datetimes.
         """
-        #Find time lag between lines
-        first_last_df=self.logdata['GPS']['Time'].iloc[[0,-1]]
-        f,l=first_last_df
-        f_logline,l_logline=first_last_df.index
-        ms_per_logline=(l-f)/float((l_logline-f_logline))
+        if assume_continuous:
+            #Find time lag between lines
+            first_last_df=self.logdata['GPS']['Time'].iloc[[0,-1]]
+            f,l=first_last_df
+            f_logline,l_logline=first_last_df.index
+            ms_per_logline=(l-f)/float((l_logline-f_logline))
+        
+            #Add the epoch for this particular GPS format
+            if not epoch:
+                if week_of_year and year:
+                    epoch=datetime.datetime(year=year,month=1,day=1)+datetime.timedelta(week_of_year)
+                if year and month:
+                    epoch=datetime.datetime(year=year,month=month,day=day)
+            #increment the epoch by the first gps timestamp TODO: check for problem when no lock
+            epoch+=datetime.timedelta(milliseconds=int(f))
+            linenum2time=lambda x : epoch + datetime.timedelta(milliseconds=x * ms_per_logline)
     
-        #Add the epoch for this particular GPS format
-        if not epoch:
-            if week_of_year and year:
-                epoch=datetime.datetime(year=year,month=1,day=1)+datetime.timedelta(week_of_year)
-            if year and month:
-                epoch=datetime.datetime(year=year,month=month,day=day)
-        #increment the epoch by the first gps timestamp TODO: check for problem when no lock
-        epoch+=datetime.timedelta(milliseconds=int(f))
-        linenum2time=lambda x : epoch + datetime.timedelta(milliseconds=x * ms_per_logline)
-
-        for cmd_table in self.logdata.values():
-            cmd_table.rename_axis(linenum2time,inplace=True)
+            for cmd_table in self.logdata.values():
+                cmd_table.rename_axis(linenum2time,inplace=True)
+        else:
+            #deal with discontinuities
+            pass
+            
     
     def plot(self, suppress=('APM 2','FMT','D32','PM','MODE','PARM','ArduCopter','Free RAM','CMD'), **kwargs):
         """
