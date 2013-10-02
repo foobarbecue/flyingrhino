@@ -12,7 +12,7 @@
    #See the License for the specific language governing permissions and
    #limitations under the License.
 
-import calendar, datetime, re, unicodedata
+import calendar, datetime, re, unicodedata, random
 
 def dt2jsts(datetime):
     """
@@ -42,3 +42,17 @@ def slugify(value):
     value = unicodedata.normalize('NFKD', unicode(value)).encode('ascii', 'ignore').decode('ascii')
     value = re.sub('[^\w\s-]', '', value).strip().lower()
     return re.sub('[-\s]+', '-', value)
+
+def stringify4sql(tstamp):
+    try:
+        return tstamp.isoformat().replace('T',' ')
+    except AttributeError:
+        return str(random.randint(0,1e9))
+
+def start_of_week(dt):
+    isocaldt=dt.isocalendar()
+    dt=dt-datetime.timedelta(days=dt.weekday())
+    return datetime.datetime(year=dt.year, month=dt.month, day=dt.day)
+
+def logpath2week_epoch(filepath):
+    return start_of_week(logpath2dt(filepath))

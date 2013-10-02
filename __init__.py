@@ -12,7 +12,7 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-import pandas, datetime, utils, string, pdb, numpy
+import pandas, datetime, utils, string, numpy, pdb
 import pylab, sqlite3
 from pymavlink import mavutil
 
@@ -57,16 +57,18 @@ fmt_dtypes={
 class flight():
     logdata=None
     flight_name=None
-    def __init__(self, dflog_path, messaging=None, **time_kwargs):
-        self.read_dflog(dflog_path)
+    def __init__(self, dflog_path, messaging=None, set_times=True, **time_kwargs):
+        #calculate the beginning of the week from logfile name for ublox timestamps
+        week_epoch=utils.logpath2dt(dflog_path)
+        self.read_dflog(dflog_path, epoch=week_epoch)
         self.set_dtype_from_fmt()
         
-        #if no starttime info, use the filename date
-        dt=utils.logpath2dt(dflog_path)
-        self.flight_name=utils.slugify(dflog_path.split('/')[-1]).replace(' ','-')
-        self.set_times_from_ublox(year=dt.year, month=dt.month, day=dt.day)
 
-    def read_dflog(self, dflog_path, start_time=None, max_cols=20):
+        self.flight_name=utils.slugify(dflog_path.split('/')[-1])
+        if set_times:
+            self.set_times_from_ublox(year=dt.year, month=dt.month, day=dt.day)
+
+    def read_dflog(self, dflog_path, start_time=None, max_cols=20, epoch=None):
         """
         Reads in a APM dataflash .log file, returning it as a pandas DataFrame.
         File must be in the self-describing format (no legacy support yet).
@@ -76,8 +78,23 @@ class flight():
         DataFrame for each message type.    
         """
         dflog_data=pandas.read_csv(dflog_path,header=None,names=string.lowercase[:max_cols],skipinitialspace=True)
+        self.num_lines=dflog_data.shape[0]
+        #interpolate gps timestamps
+        gpslines=dflog_data['a']=='GPS'
+        dflog_data['timestamp']=dflog_data['c'][gpslines]
+        dflog_data['orig_linenum']=dflog_data.index
+        dflog_data.timestamp=dflog_data.timestamp.interpolate()
+        #turn timestamp values into datetimes if we have a starting week
+        def gpststamp2dt(timestamp):
+            if not numpy.isnan(timestamp):
+                return epoch + datetime.timedelta(milliseconds=timestamp)
+        if epoch:
+            dflog_data['timestamp']=dflog_data.timestamp.apply(gpststamp2dt)
         #Group rows by command type and make a dictionary where command types are keys, values are dataframes
         dflog_by_msg={k:v for k, v in dflog_data.groupby('a',sort=False)}
+        #modify format table so that all messages receive a timestamp column
+        dflog_by_msg['FMT']['timestamp']=['timestamp']*len(dflog_by_msg['FMT'])
+        dflog_by_msg['FMT']['orig_linenum']=['orig_linenum']*len(dflog_by_msg['FMT'])
         for fmt_row in dflog_by_msg['FMT'].iterrows():
             try:
                 log_msg_type=fmt_row[1]['d'].strip()
@@ -120,33 +137,66 @@ class flight():
                 cmd_param_name, col_data = col
                 self.logdata[cmd_name][cmd_param_name]=col[1].astype(fmt_dtypes[dtype_char])
     
+    def find_armed_segments(self):
+        gpst=self.logdata['GPS']
+        #Create a boolean column that's True if this row exceeds the gap threshold
+        gpst['gaps'] = gpst.Time.diff() > 400
+        #Add the beginning and the end of the log
+        gpst['gaps'].iloc[[0,-1]] = True
+        #Use the boolean column to select those rows
+        gap_edges=gpst[gpst['gaps']]
+        gaps=[]
+        gap_edge_lns=gap_edges.index
+        for ind in range(len(gap_edge_lns)-1):
+            gaps.append((gap_edge_lns[ind], gap_edge_lns[ind+1]))
+        #This was to avoid glitches by not putting timestamps on things less than 1 sec. But, we need timestamps on everything
+        #b/c it's a PK for MavMessage.
+        #gaps_cleaned=[gap for gap in gaps if gap[1]-gap[0] > 1000]
+        return gaps
+
+    def set_times_from_ublox_segment(self, start_linenum, end_linenum, week_of_year=None, year=None, month=None, day=None, epoch=None):
+            #Find time lag between lines
+        first_last_df=self.logdata['GPS']['Time'].loc[[start_linenum,end_linenum]]
+        f,l=first_last_df
+        f_logline,l_logline=first_last_df.index
+        ms_per_logline=(l-f)/float((l_logline-f_logline))
+
+        #increment the epoch by the first gps timestamp TODO: check for problem when no lock
+        epoch+=datetime.timedelta(milliseconds=int(f))
+        
+        def linenum2time(linenum):
+            try:
+                if start_linenum < linenum < end_linenum:
+                    return epoch + datetime.timedelta(milliseconds=linenum * ms_per_logline)
+                else:
+                    return linenum
+            except TypeError:
+                return linenum
+
+        for cmd_table in self.logdata.values():
+            cmd_table.rename_axis(linenum2time,inplace=True)    
+    
     def set_times_from_ublox(self, week_of_year=None, year=None, month=None, day=None, epoch=None, assume_continuous=True):
         """
         Replaces line numbers in the log data with datetimes.
         """
-        if assume_continuous:
-            #Find time lag between lines
-            first_last_df=self.logdata['GPS']['Time'].iloc[[0,-1]]
-            f,l=first_last_df
-            f_logline,l_logline=first_last_df.index
-            ms_per_logline=(l-f)/float((l_logline-f_logline))
-        
-            #Add the epoch for this particular GPS format
-            if not epoch:
-                if week_of_year and year:
-                    epoch=datetime.datetime(year=year,month=1,day=1)+datetime.timedelta(week_of_year)
-                if year and month:
-                    epoch=datetime.datetime(year=year,month=month,day=day)
-            #increment the epoch by the first gps timestamp TODO: check for problem when no lock
-            epoch+=datetime.timedelta(milliseconds=int(f))
-            linenum2time=lambda x : epoch + datetime.timedelta(milliseconds=x * ms_per_logline)
-    
-            for cmd_table in self.logdata.values():
-                cmd_table.rename_axis(linenum2time,inplace=True)
-        else:
-            #deal with discontinuities
-            pass
-            
+        #Add the epoch for this particular GPS format
+        if not epoch:
+            if week_of_year and year:
+                epoch=datetime.datetime(year=year,month=1,day=1)+datetime.timedelta(week_of_year)
+            if year and month:
+                epoch=datetime.datetime(year=year,month=month,day=day)
+        segments=self.find_armed_segments()
+        #Store the original line number index in a new column before we overwrite them with dates.
+        for cmd_table_name in self.logdata.keys():
+            self.logdata[cmd_table_name]['orig_linenum']=self.logdata[cmd_table_name].index
+        #Replace line numbers with linearly interpolated timestamps for each segment
+        for segment in segments:
+            self.set_times_from_ublox_segment(segment[0], segment[1], epoch=epoch)
+        #Delete lines that didn't get a timestamp (before or after first / last GPS line)
+        for cmd_table_name in self.logdata.keys():
+            cmd_table=self.logdata[cmd_table_name]
+            self.logdata[cmd_table_name]=cmd_table[cmd_table.orig_linenum!=cmd_table.index]
     
     def plot(self, suppress=('APM 2','FMT','D32','PM','MODE','PARM','ArduCopter','Free RAM','CMD'), **kwargs):
         """
@@ -160,23 +210,29 @@ class flight():
         nrows=len(pltdata)/ncols
         for idx, msg_name in enumerate(pltdata):
             # idx + 1 because enumerate starts at 0 but pylab indexes starting at 1
-            pdb.set_trace()
             subpl=fig.add_subplot(nrows,ncols,idx)
             self.logdata[msg_name].plot(ax=subpl, title=msg_name, **kwargs)
-    
-    def to_afterflight_msgtbl(self,msg_type,flight_id=None):
+        
+    def to_afterflight_msgtbl(self,msg_type,flight_id=None):   
         msgtbl=self.logdata[msg_type]
+        msgtbl=msgtbl[msgtbl.timestamp!=msgtbl.orig_linenum]
+        msgtbl=msgtbl[msgtbl.timestamp.notnull()]             
         num_rows=msgtbl.shape[0]
         msgtbl=pandas.DataFrame(zip(
                     [msg_type,]*num_rows,
                     [flight_id or self.flight_name,]*num_rows,
-                    msgtbl.index))
+                    msgtbl.timestamp))
         msgtbl.columns=['msgType','flight_id','timestamp']
         msgtbl['timestamp']=msgtbl.timestamp.apply(lambda x: x.isoformat().replace('T',' '))
+            
         return msgtbl
 
     def to_afterflight_datatbl(self,msg_type):
-        datatbl=self.logdata[msg_type].stack()
+        datatbl=self.logdata[msg_type]
+        datatbl=datatbl[datatbl.timestamp!=datatbl.orig_linenum]
+        datatbl=datatbl[datatbl.timestamp.notnull()]        
+        datatbl.index=datatbl.timestamp
+        datatbl=datatbl.stack()
         datatbl=pandas.DataFrame(zip(
                     datatbl.index.get_level_values(0),
                     datatbl.index.get_level_values(1),
@@ -190,7 +246,8 @@ class flight():
         flighttbl.columns=['slug']
         return flighttbl
         
-    def to_afterflight_sql(self, dbconn=None, close_when_done=True, db_name='flyingrhi', flight_id=None):
+    def to_afterflight_sql(self, dbconn=None, close_when_done=True, db_name='flyingrhi', flight_id=None):\
+        #todo: msg_type is the same as message_table_name. Should unify variable names
         if not dbconn:
             dbconn=sqlite3.connect('flyrhi.db')
         try:
@@ -199,10 +256,14 @@ class flight():
         except dbconn.IntegrityError:
             print "Flight %s already exists in the database. Not creating." % self.flight_name 
         for msg_type in self.logdata:
+            msgtbl=self.logdata[msg_type]
+            if msg_type not in ['CMD','FMT','PARM'] and len(self.logdata[msg_type]) > 2:
                 msgtbl=self.to_afterflight_msgtbl(msg_type,flight_id)
                 msgtbl.to_sql('logbrowse_mavmessage',dbconn,if_exists='append')
                 datatbl=self.to_afterflight_datatbl(msg_type)
                 datatbl.to_sql('logbrowse_mavdatum',dbconn,if_exists='append')
                 print "Processed " + msg_type
+            else:
+                print "Ignored empty frame" + msg_type
         if close_when_done:
             dbconn.close()
