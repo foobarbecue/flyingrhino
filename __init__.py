@@ -57,17 +57,13 @@ fmt_dtypes={
 class flight():
     logdata=None
     flight_name=None
-    def __init__(self, dflog_path, messaging=None, set_times=True, **time_kwargs):
+    def __init__(self, dflog_path, messaging=None, **time_kwargs):
         #calculate the beginning of the week from logfile name for ublox timestamps
         week_epoch=utils.logpath2dt(dflog_path)
         self.read_dflog(dflog_path, epoch=week_epoch)
         self.set_dtype_from_fmt()
-        
-
         self.flight_name=utils.slugify(dflog_path.split('/')[-1])
-        if set_times:
-            self.set_times_from_ublox(year=dt.year, month=dt.month, day=dt.day)
-
+        
     def read_dflog(self, dflog_path, start_time=None, max_cols=20, epoch=None):
         """
         Reads in a APM dataflash .log file, returning it as a pandas DataFrame.
@@ -84,12 +80,15 @@ class flight():
         dflog_data['timestamp']=dflog_data['c'][gpslines]
         dflog_data['orig_linenum']=dflog_data.index
         dflog_data.timestamp=dflog_data.timestamp.interpolate()
+        #remove non-null duplicates
+        dflog_data=dflog_data[~(~dflog_data.timestamp.isnull() & dflog_data.timestamp.duplicated())]
         #turn timestamp values into datetimes if we have a starting week
         def gpststamp2dt(timestamp):
             if not numpy.isnan(timestamp):
                 return epoch + datetime.timedelta(milliseconds=timestamp)
         if epoch:
             dflog_data['timestamp']=dflog_data.timestamp.apply(gpststamp2dt)
+        
         #Group rows by command type and make a dictionary where command types are keys, values are dataframes
         dflog_by_msg={k:v for k, v in dflog_data.groupby('a',sort=False)}
         #modify format table so that all messages receive a timestamp column
@@ -216,7 +215,7 @@ class flight():
     def to_afterflight_msgtbl(self,msg_type,flight_id=None):   
         msgtbl=self.logdata[msg_type]
         msgtbl=msgtbl[msgtbl.timestamp!=msgtbl.orig_linenum]
-        msgtbl=msgtbl[msgtbl.timestamp.notnull()]             
+        msgtbl=msgtbl[msgtbl.timestamp.notnull()]
         num_rows=msgtbl.shape[0]
         msgtbl=pandas.DataFrame(zip(
                     [msg_type,]*num_rows,
@@ -224,13 +223,12 @@ class flight():
                     msgtbl.timestamp))
         msgtbl.columns=['msgType','flight_id','timestamp']
         msgtbl['timestamp']=msgtbl.timestamp.apply(lambda x: x.isoformat().replace('T',' '))
-            
         return msgtbl
 
     def to_afterflight_datatbl(self,msg_type):
         datatbl=self.logdata[msg_type]
         datatbl=datatbl[datatbl.timestamp!=datatbl.orig_linenum]
-        datatbl=datatbl[datatbl.timestamp.notnull()]        
+        datatbl=datatbl[datatbl.timestamp.notnull()]       
         datatbl.index=datatbl.timestamp
         datatbl=datatbl.stack()
         datatbl=pandas.DataFrame(zip(
