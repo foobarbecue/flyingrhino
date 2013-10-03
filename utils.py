@@ -13,6 +13,7 @@
    #limitations under the License.
 
 import calendar, datetime, re, unicodedata, random
+from pytz import utc
 
 def dt2jsts(datetime):
     """
@@ -27,9 +28,11 @@ def logpath2dt(filepath):
     return a datetime which says when the file was downloaded from the APM
     """
     try:
-        return datetime.datetime.strptime(filepath.split('/')[-1].replace('log','').replace('tlog','').replace(' ','-')[:16],'%Y-%m-%d-%H-%M')
+        outtime=datetime.datetime.strptime(filepath.split('/')[-1].replace('log','').replace('tlog','').replace(' ','-')[:16],'%Y-%m-%d-%H-%M')
+        return utc.localize(outtime)
     except AttributeError:
-        return datetime.datetime.strptime(re.match(r'.*/(.*) .*$',filepath.replace('_',' ')).groups()[0],'%Y-%m-%d %H-%M')
+        outtime=datetime.datetime.strptime(re.match(r'.*/(.*) .*$',filepath.replace('_',' ')).groups()[0],'%Y-%m-%d %H-%M')
+        return utc.localize(outtime)
 
 def slugify(value):
     """
