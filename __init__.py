@@ -244,7 +244,7 @@ class flight():
         flighttbl.columns=['slug']
         return flighttbl
         
-    def to_afterflight_sql(self, dbconn=None, close_when_done=True, db_name='flyingrhi', flight_id=None):\
+    def to_afterflight_sql(self, dbconn=None, close_when_done=True, db_name='flyingrhi', flight_id=None):
         #todo: msg_type is the same as message_table_name. Should unify variable names
         if not dbconn:
             dbconn=sqlite3.connect('flyrhi.db')
@@ -261,6 +261,8 @@ class flight():
                 datatbl=self.to_afterflight_datatbl(msg_type)
                 datatbl.to_sql('logbrowse_mavdatum',dbconn,if_exists='append')
                 print "Processed " + msg_type
+                if self.messaging:
+                    self.messaging("Processed " + msg_type)
             else:
                 print "Ignored empty frame" + msg_type
         if close_when_done:
