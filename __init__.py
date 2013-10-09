@@ -63,6 +63,7 @@ class flight():
         self.read_dflog(dflog_path, epoch=week_epoch)
         self.set_dtype_from_fmt()
         self.flight_name=utils.slugify(dflog_path.split('/')[-1])
+        self.messaging=messaging
         
     def read_dflog(self, dflog_path, start_time=None, max_cols=20, epoch=None):
         """
@@ -253,7 +254,7 @@ class flight():
             flighttbl.to_sql('logbrowse_flight',dbconn,if_exists='append')
         except dbconn.IntegrityError:
             print "Flight %s already exists in the database. Not creating." % self.flight_name 
-        for msg_type in self.logdata:
+        for ind, msg_type in enumerate(self.logdata):
             msgtbl=self.logdata[msg_type]
             if msg_type not in ['CMD','FMT','PARM'] and len(self.logdata[msg_type]) > 2:
                 msgtbl=self.to_afterflight_msgtbl(msg_type,flight_id)
@@ -262,7 +263,7 @@ class flight():
                 datatbl.to_sql('logbrowse_mavdatum',dbconn,if_exists='append')
                 print "Processed " + msg_type
                 if self.messaging:
-                    self.messaging("Processed " + msg_type)
+                    self.messaging("Processed " + msg_type, length=len(self.logdata), uploaded=ind)
             else:
                 print "Ignored empty frame" + msg_type
         if close_when_done:
