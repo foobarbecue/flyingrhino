@@ -240,6 +240,20 @@ class flight():
         datatbl['timestamp']=datatbl.timestamp.apply(lambda x: x.isoformat().replace('T',' '))
         return datatbl
     
+    def to_afterflight_paramtbl(self,flight_id=None):
+        """
+        Special case for making a table of MavDatum objects for flight parameters
+        """
+        paramtbl=self.logdata['PARM']      
+        #paramtbl.index=paramtbl.timestamp
+        paramtbl.Name=paramtbl.Name.apply(lambda x: 'PARM-'+x)
+        num_rows=paramtbl.shape[0]
+        paramtbl=pandas.DataFrame(zip([flight_id or self.flight_name,]*num_rows,
+                                  paramtbl.Name,
+                                  paramtbl.Value))
+        paramtbl.columns=['flight_id','name', 'value']
+        return paramtbl
+    
     def to_afterflight_flighttbl(self,flight_id=None):
         flighttbl=pandas.DataFrame([self.flight_name,])
         flighttbl.columns=['slug']
@@ -260,11 +274,13 @@ class flight():
                 msgtbl=self.to_afterflight_msgtbl(msg_type,flight_id)
                 msgtbl.to_sql('logbrowse_mavmessage',dbconn,if_exists='append')
                 datatbl=self.to_afterflight_datatbl(msg_type)
-                datatbl.to_sql('logbrowse_mavdatum',dbconn,if_exists='append')
+                datatbl.to_sql('logbrowse_mavdatum',dbconn,if_exists='append')            
                 print "Processed " + msg_type
                 if self.messaging:
                     self.messaging("Processed " + msg_type, length=len(self.logdata), uploaded=ind)
             else:
                 print "Ignored empty frame" + msg_type
+            paramtbl=self.to_afterflight_paramtbl(msg_type)
+            paramtbl.to_sql('logbrowse_param',dbconn,if_exists='append')
         if close_when_done:
             dbconn.close()

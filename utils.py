@@ -28,7 +28,9 @@ def logpath2dt(filepath):
     return a datetime which says when the file was downloaded from the APM
     """
     try:
-        outtime=datetime.datetime.strptime(filepath.split('/')[-1].replace('log','').replace('tlog','').replace(' ','-')[:16],'%Y-%m-%d-%H-%M')
+        outtime=filepath.split('/')[-1].replace('log','').replace('tlog','').replace(' ','-')
+        outtime=re.findall('\d{4}(?:-\d\d){4}',outtime)[0]
+        outtime=datetime.datetime.strptime(outtime,'%Y-%m-%d-%H-%M')
         return utc.localize(outtime)
     except AttributeError:
         outtime=datetime.datetime.strptime(re.match(r'.*/(.*) .*$',filepath.replace('_',' ')).groups()[0],'%Y-%m-%d %H-%M')
