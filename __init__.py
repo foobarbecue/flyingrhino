@@ -78,7 +78,10 @@ class flight():
         self.num_lines=dflog_data.shape[0]
         #interpolate gps timestamps
         gpslines=dflog_data['a']=='GPS'
-        dflog_data['timestamp']=dflog_data['c'][gpslines]
+        #determine which column of GPS data contains the timestamp
+        gps_fmt_line=dflog_data[dflog_data['d']=='GPS'].transpose()[4:].reset_index(drop=True)
+        timecol=gps_fmt_line[gps_fmt_line=='Time'].dropna().index[0]
+        dflog_data['timestamp']=dflog_data[gpslines].iloc[:,timecol]
         dflog_data['orig_linenum']=dflog_data.index
         dflog_data.timestamp=dflog_data.timestamp.interpolate()
         #remove non-null duplicates
@@ -109,7 +112,13 @@ class flight():
                     #TODO set column names on FMT table. Opens a can of worms.
                     continue
                 msg_col_labels=fmt_row[1]['f':].dropna()
-                dflog_msg.columns=msg_col_labels[:len(dflog_msg.columns)]
+                #Deal with length mismatches between FMT specs and actual data by shortening the longer one
+                #TODO handle better
+                if len(dflog_msg.columns) > len(msg_col_labels):
+                    dflog_msg=dflog_msg.iloc[:,:len(msg_col_labels)]
+                elif len(dflog_msg.columns) < len(msg_col_labels):
+                    msg_col_labels=msg_col_labels[:len(dflog_msg.columns)]
+                dflog_msg.columns=msg_col_labels
                 dflog_by_msg[log_msg_type]=dflog_msg
             except KeyError:
                 print "No %s information" % log_msg_type
@@ -135,7 +144,10 @@ class flight():
                 continue
             for col, dtype_char in zip(cmd_dataframe.iteritems(), cmd_dtypes_str):
                 cmd_param_name, col_data = col
-                self.logdata[cmd_name][cmd_param_name]=col[1].astype(fmt_dtypes[dtype_char])
+                try:
+                    self.logdata[cmd_name][cmd_param_name]=col[1].astype(fmt_dtypes[dtype_char])
+                except TypeError:
+                    print "type conversion failed on %s" % col[0]
     
     def find_armed_segments(self):
         gpst=self.logdata['GPS']
@@ -244,15 +256,19 @@ class flight():
         """
         Special case for making a table of MavDatum objects for flight parameters
         """
-        paramtbl=self.logdata['PARM']      
-        #paramtbl.index=paramtbl.timestamp
-        paramtbl.Name=paramtbl.Name.apply(lambda x: 'PARM-'+x)
-        num_rows=paramtbl.shape[0]
-        paramtbl=pandas.DataFrame(zip([flight_id or self.flight_name,]*num_rows,
-                                  paramtbl.Name,
-                                  paramtbl.Value))
-        paramtbl.columns=['flight_id','name', 'value']
-        return paramtbl
+        try:
+            paramtbl=self.logdata['PARM']
+            #paramtbl.index=paramtbl.timestamp
+            paramtbl.Name=paramtbl.Name.apply(lambda x: 'PARM-'+x)
+            num_rows=paramtbl.shape[0]
+            paramtbl=pandas.DataFrame(zip([flight_id or self.flight_name,]*num_rows,
+                                      paramtbl.Name,
+                                      paramtbl.Value))
+            paramtbl.columns=['flight_id','name', 'value']
+            return paramtbl
+        except KeyError:
+            #parameters weren't stored in old versions of dataflash logs 
+            pass
     
     def to_afterflight_flighttbl(self,flight_id=None):
         flighttbl=pandas.DataFrame([self.flight_name,])
@@ -281,6 +297,7 @@ class flight():
             else:
                 print "Ignored empty frame" + msg_type
             paramtbl=self.to_afterflight_paramtbl(msg_type)
-            paramtbl.to_sql('logbrowse_param',dbconn,if_exists='append')
+            if paramtbl:
+                paramtbl.to_sql('logbrowse_param',dbconn,if_exists='append')
         if close_when_done:
             dbconn.close()

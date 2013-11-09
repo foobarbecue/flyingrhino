@@ -15,6 +15,13 @@
 import calendar, datetime, re, unicodedata, random
 from pytz import utc
 
+def shorten_to_common(iterone,itertwo):
+    if len(iterone) > len(itertwo):
+        iterone = iterone[:len(itertwo)]
+    elif len(iterone) < len(itertwo):
+        itertwo = itertwo[:len(iterone)]
+    return iterone, itertwo
+
 def dt2jsts(datetime):
     """
     Given a python datetime, convert to javascript timestamp format (milliseconds since Jan 1 1970).
