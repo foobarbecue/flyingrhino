@@ -64,15 +64,15 @@ class flight():
         self.set_dtype_from_fmt()
         self.flight_name=utils.slugify(dflog_path.split('/')[-1])
         self.messaging=messaging
-        
+
     def read_dflog(self, dflog_path, start_time=None, max_cols=20, epoch=None):
         """
         Reads in a APM dataflash .log file, returning it as a pandas DataFrame.
         File must be in the self-describing format (no legacy support yet).
-    
+
         Given the path to a log file produced by the ArduPilotMega Mission Planner,
         stores a dict of :class:`pandas.DataFrame`, in self.logdata, with one
-        DataFrame for each message type.    
+        DataFrame for each message type.
         """
         dflog_data=pandas.read_csv(dflog_path,header=None,names=string.lowercase[:max_cols],skipinitialspace=True)
         self.num_lines=dflog_data.shape[0]
@@ -80,7 +80,7 @@ class flight():
         gpslines=dflog_data['a']=='GPS'
         #determine which column of GPS data contains the timestamp
         gps_fmt_line=dflog_data[dflog_data['d']=='GPS'].transpose()[4:].reset_index(drop=True)
-        timecol=gps_fmt_line[gps_fmt_line=='Time'].dropna().index[0]
+        timecol=gps_fmt_line[(gps_fmt_line=='TimeMS')|(gps_fmt_line=='Time')].dropna().index[0]
         dflog_data['timestamp']=dflog_data[gpslines].iloc[:,timecol]
         dflog_data['orig_linenum']=dflog_data.index
         dflog_data.timestamp=dflog_data.timestamp.interpolate()
@@ -92,7 +92,7 @@ class flight():
                 return epoch + datetime.timedelta(milliseconds=timestamp)
         if epoch:
             dflog_data['timestamp']=dflog_data.timestamp.apply(gpststamp2dt)
-        
+
         #Group rows by command type and make a dictionary where command types are keys, values are dataframes
         dflog_by_msg={k:v for k, v in dflog_data.groupby('a',sort=False)}
         #modify format table so that all messages receive a timestamp column
@@ -103,7 +103,7 @@ class flight():
                 log_msg_type=fmt_row[1]['d'].strip()
                 #Drop null columns
                 dflog_by_msg[log_msg_type]=dflog_by_msg[log_msg_type].dropna(axis=1,how='all')
-                #Select data for one command 
+                #Select data for one command
                 dflog_msg=dflog_by_msg[log_msg_type]
                 #Remove message name
                 del dflog_msg['a']
@@ -124,11 +124,11 @@ class flight():
                 print "No %s information" % log_msg_type
                 continue
         self.logdata=dflog_by_msg
-    
-    
+
+
     def save_logdict_as_hdf5(self):
         raise NotImplementedError
-    
+
     def set_dtype_from_fmt(self):
         """
         Uses data in the FMT tables to write correct column headers to an APM
@@ -148,7 +148,7 @@ class flight():
                     self.logdata[cmd_name][cmd_param_name]=col[1].astype(fmt_dtypes[dtype_char])
                 except TypeError:
                     print "type conversion failed on %s" % col[0]
-    
+
     def find_armed_segments(self):
         gpst=self.logdata['GPS']
         #Create a boolean column that's True if this row exceeds the gap threshold
@@ -175,7 +175,7 @@ class flight():
 
         #increment the epoch by the first gps timestamp TODO: check for problem when no lock
         epoch+=datetime.timedelta(milliseconds=int(f))
-        
+
         def linenum2time(linenum):
             try:
                 if start_linenum < linenum < end_linenum:
@@ -186,8 +186,8 @@ class flight():
                 return linenum
 
         for cmd_table in self.logdata.values():
-            cmd_table.rename_axis(linenum2time,inplace=True)    
-    
+            cmd_table.rename_axis(linenum2time,inplace=True)
+
     def set_times_from_ublox(self, week_of_year=None, year=None, month=None, day=None, epoch=None, assume_continuous=True):
         """
         Replaces line numbers in the log data with datetimes.
@@ -209,7 +209,7 @@ class flight():
         for cmd_table_name in self.logdata.keys():
             cmd_table=self.logdata[cmd_table_name]
             self.logdata[cmd_table_name]=cmd_table[cmd_table.orig_linenum!=cmd_table.index]
-    
+
     def plot(self, suppress=('APM 2','FMT','D32','PM','MODE','PARM','ArduCopter','Free RAM','CMD'), **kwargs):
         """
         Plots the data in a single column of subplots.
@@ -224,8 +224,8 @@ class flight():
             # idx + 1 because enumerate starts at 0 but pylab indexes starting at 1
             subpl=fig.add_subplot(nrows,ncols,idx)
             self.logdata[msg_name].plot(ax=subpl, title=msg_name, **kwargs)
-        
-    def to_afterflight_msgtbl(self,msg_type,flight_id=None):   
+
+    def to_afterflight_msgtbl(self,msg_type,flight_id=None):
         msgtbl=self.logdata[msg_type]
         msgtbl=msgtbl[msgtbl.timestamp!=msgtbl.orig_linenum]
         msgtbl=msgtbl[msgtbl.timestamp.notnull()]
@@ -241,7 +241,7 @@ class flight():
     def to_afterflight_datatbl(self,msg_type):
         datatbl=self.logdata[msg_type]
         datatbl=datatbl[datatbl.timestamp!=datatbl.orig_linenum]
-        datatbl=datatbl[datatbl.timestamp.notnull()]       
+        datatbl=datatbl[datatbl.timestamp.notnull()]
         datatbl.index=datatbl.timestamp
         datatbl=datatbl.stack()
         datatbl=pandas.DataFrame(zip(
@@ -251,7 +251,7 @@ class flight():
         datatbl.columns=['timestamp','msgField','value']
         datatbl['timestamp']=datatbl.timestamp.apply(lambda x: x.isoformat().replace('T',' '))
         return datatbl
-    
+
     def to_afterflight_paramtbl(self,flight_id=None):
         """
         Special case for making a table of MavDatum objects for flight parameters
@@ -267,14 +267,14 @@ class flight():
             paramtbl.columns=['flight_id','name', 'value']
             return paramtbl
         except KeyError:
-            #parameters weren't stored in old versions of dataflash logs 
+            #parameters weren't stored in old versions of dataflash logs
             pass
-    
+
     def to_afterflight_flighttbl(self,flight_id=None):
         flighttbl=pandas.DataFrame([self.flight_name,])
         flighttbl.columns=['slug']
         return flighttbl
-        
+
     def to_afterflight_sql(self, dbconn=None, close_when_done=True, db_name='flyingrhi', flight_id=None):
         #todo: msg_type is the same as message_table_name. Should unify variable names
         if not dbconn:
@@ -283,14 +283,14 @@ class flight():
             flighttbl=self.to_afterflight_flighttbl(flight_id)
             flighttbl.to_sql('logbrowse_flight',dbconn,if_exists='append')
         except dbconn.IntegrityError:
-            print "Flight %s already exists in the database. Not creating." % self.flight_name 
+            print "Flight %s already exists in the database. Not creating." % self.flight_name
         for ind, msg_type in enumerate(self.logdata):
             msgtbl=self.logdata[msg_type]
             if msg_type not in ['CMD','FMT','PARM'] and len(self.logdata[msg_type]) > 2:
                 msgtbl=self.to_afterflight_msgtbl(msg_type,flight_id)
                 msgtbl.to_sql('logbrowse_mavmessage',dbconn,if_exists='append')
                 datatbl=self.to_afterflight_datatbl(msg_type)
-                datatbl.to_sql('logbrowse_mavdatum',dbconn,if_exists='append')            
+                datatbl.to_sql('logbrowse_mavdatum',dbconn,if_exists='append')
                 print "Processed " + msg_type
                 if self.messaging:
                     self.messaging("Processed " + msg_type, length=len(self.logdata), uploaded=ind)
